@@ -1,0 +1,127 @@
+#!/usr/bin/env python
+# -*- coding=utf-8 -*-
+
+"""
+Author: Rosen
+Mail: rosenluov@gmail.com
+File: nginx-monitor-agent
+Created Time: Fri Jan  6 17:06:23 2017
+"""
+
+import logging
+import sys
+from multiprocessing import Process, Queue
+from os import getpid
+from time import time, sleep
+from traceback import print_exc
+
+import requests
+import statsd
+
+from conf.settings import (URL,
+                           STDERR,
+                           HOSTNAME,
+                           STATSD_FILE,
+                           PID_FILE,
+                           NGINX_FILE,
+                           METRICS)
+from utils.common import load_yaml_data
+from utils.daemonize import Daemon
+
+log = logging.getLogger('')
+q = Queue(10)
+
+
+class MyDaemon(Daemon):
+    @staticmethod
+    def run():
+        log.info("Daemon started with pid %d! \n", getpid())
+        while True:
+            if int(time()) % 10 == 0:
+                p = Process(target=main)
+                p.start()
+                p.join()
+                sleep(1)
+
+
+def load_statsd_conf(filename):
+    if filename:
+        data = load_yaml_data(filename)
+        host = data.get('host', '')
+        port = data.get('port', '')
+        return host, port
+
+
+def load_nginx_conf(filename):
+    if filename:
+        data = load_yaml_data(filename)
+        prefix = data.get('cluster_name', 'nginx')
+        return prefix
+
+
+def get_nginx_data():
+    res = requests.get(URL, timeout=10).text
+    data = res.split('\n')
+    domain_data = {}
+    finally_data = {}
+    for k in data:
+        value = k.split(',')
+        domain = value[0]
+        domain_data[domain] = value[1:]
+    for domain in domain_data:
+        if domain:
+            temp = {}
+            for num in range(0, len(domain_data[domain])):
+                temp[METRICS['domain'][num]] = int(domain_data[domain][num])
+            finally_data[domain] = temp
+    return finally_data
+
+
+def send_to_statsd(statsd_client, data=None):
+    try:
+        if data:
+            for domain in data:
+                domain_name = domain.replace('.', '_')
+                for k, v in data[domain].items():
+                    metric = HOSTNAME + '.' + domain_name + '.' + k
+                    statsd_client.gauge(metric, v)
+                    # log.info(metric + ":" + str(v))
+                log.info('Successfully sent %d metrics for %s !', len(data[domain]), domain)
+    except Exception as e:
+        log.error(e)
+        print_exc()
+
+
+def main():
+    prefix = load_nginx_conf(NGINX_FILE)
+    statsd_host, statsd_port = load_statsd_conf(STATSD_FILE)
+    statsd_client = statsd.StatsClient(statsd_host, statsd_port, prefix)
+    try:
+        finally_data = get_nginx_data()
+        if finally_data:
+            send_to_statsd(statsd_client, finally_data)
+            log.info('---\n')
+    except Exception as e:
+        log.info(e)
+        print_exc()
+
+
+if __name__ == '__main__':
+    myDaemon = MyDaemon(pidfile=PID_FILE,
+                        stderr=STDERR,
+                        )
+    args = sys.argv
+    if len(args) == 2:
+        if 'start' == args[1]:
+            myDaemon.start()
+        elif 'stop' == args[1]:
+            myDaemon.stop()
+        elif 'restart' == args[1]:
+            myDaemon.restart()
+        else:
+            log.error('*** Unknown command')
+            sys.exit(2)
+        sys.exit(0)
+    else:
+        print('Usage: {} start|stop|restart'.format(args[0]))
+        sys.exit(2)

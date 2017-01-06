@@ -1,0 +1,15 @@
+[Unit]
+Description=Monitor agent for nginx
+After=network.target
+
+[Service]
+Type=forking
+WorkingDirectory=/opt/nginx-monitor-agent
+PIDFile=/var/run/nginx-monitor-agent/nginx-monitor-agent.pid
+ExecStart=/opt/nginx-monitor-agent/server.sh start
+ExecReload=/opt/nginx-monitor-agent/server.sh restart
+ExecStop=/opt/nginx-monitor-agent/server.sh stop
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
