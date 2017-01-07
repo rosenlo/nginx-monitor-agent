@@ -1,5 +1,5 @@
 ## Nginx monitor agent
-The monitoring agent collects state information by uses the [ngx_http_reqstat_module](http://tengine.taobao.org/document/http_reqstat.html) module provide by [Tengine](https://github.com/alibaba/tengine), and sends it to [Graphite](http://graphite.readthedocs.io/en/latest), and views metrics through [Grafana](https://github.com/grafana/grafana).
+The monitoring agent collects state information by use the [ngx_http_reqstat_module](http://tengine.taobao.org/document/http_reqstat.html) module provide by [Tengine](https://github.com/alibaba/tengine), and sends it to [Graphite](http://graphite.readthedocs.io/en/latest), and views metrics through [Grafana](https://github.com/grafana/grafana).
 
 ### Requirements
 - Python (>=2.7)
@@ -12,7 +12,7 @@ The monitoring agent collects state information by uses the [ngx_http_reqstat_mo
 ### Usage
 1. Agent can be started as a daemon in a virtual environment using the following command: `python nginx-monitor-agent start` or `systemctl start nginx-monitor-agent.service`
 2. The daemon can be stopped by running: `python nginx-monitor-agent stop` or `systemctl stop nginx-monitor-agent.service`
-3. The daemon can be restarted by running: python `nginx-monitor-agent restart` or `systemctl restart nginx-monitor-agent.service`
+3. The daemon can be restarted by running: `python nginx-monitor-agent restart` or `systemctl restart nginx-monitor-agent.service`
 
 ### Systemd example
 > \# vi /etc/systemd/system/nginx-monitor-agent.service
@@ -37,13 +37,13 @@ WantedBy=multi-user.target
 ```
 
 ### Started script for virtual envirnoment
+> \# vi /opt/nginx-monitor-agent/server.sh
 
 ```bash
 #!/bin/bash
 
 WORK_HOME="/opt/nginx-monitor-agent"
 VENV_HOME="$WORK_HOME/.venv"
-
 
 source $VENV_HOME/bin/activate
 
