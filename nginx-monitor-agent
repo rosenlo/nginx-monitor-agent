@@ -56,7 +56,8 @@ def load_nginx_conf(filename):
     if filename:
         data = load_yaml_data(filename)
         prefix = data.get('cluster_name', 'nginx')
-        return prefix
+        idc_addr = data.get('idc_addr', 'xg')
+        return prefix, idc_addr
 
 
 def get_nginx_data():
@@ -77,15 +78,31 @@ def get_nginx_data():
     return finally_data
 
 
-def send_to_statsd(statsd_client, data=None):
+def timer_to_gauge(data=None):
+    counter_stats_data = {}
+    if not q.empty():
+        log.info('Get a message from the Queue.')
+        old_stats_data = q.get()
+        for domain in data:
+            counter_stats_data[domain] = {}
+            for metric in data[domain]:
+                value = round((int(data[domain][metric]) - int(old_stats_data[domain][metric])) / 10, 2)
+                counter_stats_data[domain].update({metric: value})
+        return counter_stats_data
+    else:
+        log.error('Queue is empty!')
+        return data
+
+
+def send_to_statsd(statsd_client, data=None, idc_addr='xg'):
     try:
         if data:
             for domain in data:
                 domain_name = domain.replace('.', '_')
                 for k, v in data[domain].items():
-                    metric = HOSTNAME + '.' + domain_name + '.' + k
+                    metric = idc_addr + '.' + HOSTNAME + '.' + domain_name + '.' + k
                     statsd_client.gauge(metric, v)
-                    # log.info(metric + ":" + str(v))
+                    log.info(metric + ":" + str(v))
                 log.info('Successfully sent %d metrics for %s !', len(data[domain]), domain)
     except Exception as e:
         log.error(e)
@@ -93,13 +110,17 @@ def send_to_statsd(statsd_client, data=None):
 
 
 def main():
-    prefix = load_nginx_conf(NGINX_FILE)
+    prefix, idc_addr = load_nginx_conf(NGINX_FILE)
     statsd_host, statsd_port = load_statsd_conf(STATSD_FILE)
     statsd_client = statsd.StatsClient(statsd_host, statsd_port, prefix)
     try:
-        finally_data = get_nginx_data()
-        if finally_data:
-            send_to_statsd(statsd_client, finally_data)
+        nginx_data = get_nginx_data()
+        if nginx_data:
+            finally_data = timer_to_gauge(nginx_data)
+            if q.empty():
+                q.put(nginx_data)
+                log.info("Data has been put to the Queue!")
+            send_to_statsd(statsd_client, finally_data, idc_addr)
             log.info('---\n')
     except Exception as e:
         log.info(e)

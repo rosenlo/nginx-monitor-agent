@@ -66,7 +66,6 @@ logging.config.dictConfig({
 
 METRICS = {
     'domain': [
-        'kv',
         'bytes_in',
         'bytes_out',
         'conn_total',

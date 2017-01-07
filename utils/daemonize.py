@@ -86,7 +86,7 @@ class Daemon(object):
             pf = open(self.pidfile, 'r')
             pid = int(pf.read().strip())
             pf.close()
-            message = 'es-agent will be stop...\n'
+            message = 'Nginx agent will be stop...\n'
             self.flume_logger_out.info(message)
         except IOError:
             pid = None
