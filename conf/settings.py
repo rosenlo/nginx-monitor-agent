@@ -15,6 +15,7 @@ from socket import gethostname
 BASE_DIR = path.dirname(path.abspath(__file__))
 NGINX_FILE = BASE_DIR + '/nginx-config.yaml'
 STATSD_FILE = BASE_DIR + '/statsd.yaml'
+OPEN_FALCON = BASE_DIR + '/open-falcon.yaml'
 PID_FILE = '/var/run/nginx-monitor-agent/nginx-monitor-agent.pid'
 HOSTNAME = gethostname()
 URL = "http://127.0.0.1/req_status"
@@ -47,7 +48,7 @@ logging.config.dictConfig({
         'file': {
             'level': 'DEBUG',
             'class': 'cloghandler.ConcurrentRotatingFileHandler',
-            'maxBytes': 1024 * 1024 * 100,
+            'maxBytes': 1024 * 1024 * 10,
             'backupCount': 50,
             # If delay is true,
             # then file opening is deferred until the first call to emit().
