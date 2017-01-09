@@ -98,3 +98,8 @@ METRICS = {
         'http_ups_5xx'
     ]
 }
+
+SEC_METRICS = {
+    'rt': 'req_total',
+    'ups_rt': 'ups_req',
+}

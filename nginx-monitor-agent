@@ -7,7 +7,7 @@ Mail: rosenluov@gmail.com
 File: nginx-monitor-agent
 Created Time: Fri Jan  6 17:06:23 2017
 """
-
+import json
 import logging
 import sys
 from multiprocessing import Process, Queue
@@ -24,6 +24,8 @@ from conf.settings import (URL,
                            STATSD_FILE,
                            PID_FILE,
                            NGINX_FILE,
+    # OPEN_FALCON,
+                           SEC_METRICS,
                            METRICS)
 from utils.common import load_yaml_data
 from utils.daemonize import Daemon
@@ -60,6 +62,25 @@ def load_nginx_conf(filename):
         return prefix, idc_addr
 
 
+def load_falcon_conf(filename=None):
+    data = load_yaml_data(filename)
+    url = data.get('url', '')
+    return url
+
+
+def falcon_structure(endpoint, metric, timestamp, value, counter_type, tags=None):
+    structure = {
+        'endpoint': endpoint,
+        'metric': metric,
+        'timestamp': timestamp,
+        'step': 10,
+        'value': value,
+        'counterType': counter_type,
+        'tags': tags
+    }
+    return structure
+
+
 def get_nginx_data():
     res = requests.get(URL, timeout=10).text
     data = res.split('\n')
@@ -81,50 +102,102 @@ def get_nginx_data():
 def timer_to_gauge(data=None):
     counter_stats_data = {}
     if not q.empty():
-        log.info('Get a message from the Queue.')
         old_stats_data = q.get()
+        log.info('Get a message from the Queue.')
         for domain in data:
             counter_stats_data[domain] = {}
             for metric in data[domain]:
                 value = round((int(data[domain][metric]) - int(old_stats_data[domain][metric])) / 10, 2)
                 counter_stats_data[domain].update({metric: value})
-        return counter_stats_data
     else:
         log.error('Queue is empty!')
-        return data
+    return counter_stats_data
 
 
-def send_to_statsd(statsd_client, data=None, idc_addr='xg'):
-    try:
-        if data:
-            for domain in data:
-                domain_name = domain.replace('.', '_')
-                for k, v in data[domain].items():
-                    metric = idc_addr + '.' + HOSTNAME + '.' + domain_name + '.' + k
-                    statsd_client.gauge(metric, v)
-                    log.info(metric + ":" + str(v))
-                log.info('Successfully sent %d metrics for %s !', len(data[domain]), domain)
-    except Exception as e:
-        log.error(e)
-        print_exc()
+def timer_to_timer_rate(data=None):
+    sec_data = {}
+    for domain in data:
+        sec_data[domain] = {}
+        for metric in data[domain]:
+            for k, v in SEC_METRICS.items():
+                if k == metric:
+                    key = k + '.sec'
+                    try:
+                        sec_data[domain].update({key: round(data[domain][k] / data[domain][v], 2)})
+                    except ZeroDivisionError:
+                        sec_data[domain].update({key: 0})
+                    except Exception as e:
+                        log.info(e)
+                        print_exc()
+        data[domain] = dict(data[domain], **sec_data[domain])
+    return data
+
+
+def fmt_data_statsd(data=None, idc_addr='xg'):
+    finally_data = {}
+    if data:
+        for domain in data:
+            domain_name = domain.replace('.', '_')
+            for k, v in data[domain].items():
+                metric = idc_addr + '.' + HOSTNAME + '.' + domain_name + '.' + k
+                finally_data[metric] = v
+        return finally_data
+
+
+# def get_finally_data_falcon(data=None, idc_addr='xg'):
+#     finally_data = {}
+
+
+def send_to_falcon(url=None, data=None):
+    if data and url:
+        res = requests.post(url, data=json.dumps(data))
+        return res
+
+
+def send_to_statsd(statsd_client, data=None):
+    if data:
+        for metric, v in data.items():
+            statsd_client.gauge(metric, v)
+            # log.info(metric + ":" + str(v))
+        log.info('Successfully sent %d metrics !', len(data))
 
 
 def main():
     prefix, idc_addr = load_nginx_conf(NGINX_FILE)
     statsd_host, statsd_port = load_statsd_conf(STATSD_FILE)
     statsd_client = statsd.StatsClient(statsd_host, statsd_port, prefix)
+    nginx_data = get_nginx_data()
+
     try:
-        nginx_data = get_nginx_data()
         if nginx_data:
-            finally_data = timer_to_gauge(nginx_data)
+            gauge_data = timer_to_gauge(nginx_data)
+            timer_rate_data = timer_to_timer_rate(gauge_data)
+            finally_data_statsd = fmt_data_statsd(timer_rate_data, idc_addr)
+
             if q.empty():
                 q.put(nginx_data)
                 log.info("Data has been put to the Queue!")
-            send_to_statsd(statsd_client, finally_data, idc_addr)
+
+            # send metrics to StatsD
+            send_to_statsd(statsd_client, finally_data_statsd)
             log.info('---\n')
+
     except Exception as e:
-        log.info(e)
+        log.error(e)
         print_exc()
+    """
+    try:
+        # send metrics to open-falcon
+        url = load_falcon_conf(OPEN_FALCON)
+        res = send_to_falcon(url, finally_data)
+        if res != 'success':
+            raise Exception
+    except Exception as e:
+        log.error(e)
+        print_exc()
+
+    finally:
+    """
 
 
 if __name__ == '__main__':
