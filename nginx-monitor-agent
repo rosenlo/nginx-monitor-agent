@@ -24,7 +24,7 @@ from conf.settings import (URL,
                            STATSD_FILE,
                            PID_FILE,
                            NGINX_FILE,
-    # OPEN_FALCON,
+                           OPEN_FALCON,
                            SEC_METRICS,
                            METRICS)
 from utils.common import load_yaml_data
@@ -68,7 +68,7 @@ def load_falcon_conf(filename=None):
     return url
 
 
-def falcon_structure(endpoint, metric, timestamp, value, counter_type, tags=None):
+def falcon_structure(endpoint, metric, timestamp, value, counter_type='GAUGE', tags=None):
     structure = {
         'endpoint': endpoint,
         'metric': metric,
@@ -82,21 +82,25 @@ def falcon_structure(endpoint, metric, timestamp, value, counter_type, tags=None
 
 
 def get_nginx_data():
-    res = requests.get(URL, timeout=10).text
-    data = res.split('\n')
-    domain_data = {}
-    finally_data = {}
-    for k in data:
-        value = k.split(',')
-        domain = value[0]
-        domain_data[domain] = value[1:]
-    for domain in domain_data:
-        if domain:
-            temp = {}
-            for num in range(0, len(domain_data[domain])):
-                temp[METRICS['domain'][num]] = int(domain_data[domain][num])
-            finally_data[domain] = temp
-    return finally_data
+    try:
+        res = requests.get(URL, timeout=10).text
+        data = res.split('\n')
+        domain_data = {}
+        finally_data = {}
+        for k in data:
+            value = k.split(',')
+            domain = value[0]
+            domain_data[domain] = value[1:]
+        for domain in domain_data:
+            if domain:
+                temp = {}
+                for num in range(0, len(domain_data[domain])):
+                    temp[METRICS['domain'][num]] = int(domain_data[domain][num])
+                finally_data[domain] = temp
+        return finally_data
+    except requests.exceptions.Timeout as e:
+        log.info(e)
+        print_exc()
 
 
 def timer_to_gauge(data=None):
@@ -121,7 +125,7 @@ def timer_to_timer_rate(data=None):
         for metric in data[domain]:
             for k, v in SEC_METRICS.items():
                 if k == metric:
-                    key = k + '.sec'
+                    key = k + '_sec'
                     try:
                         sec_data[domain].update({key: round(data[domain][k] / data[domain][v], 2)})
                     except ZeroDivisionError:
@@ -133,19 +137,20 @@ def timer_to_timer_rate(data=None):
     return data
 
 
-def fmt_data_statsd(data=None, idc_addr='xg'):
-    finally_data = {}
+def fmt_finally_data(data=None, idc_addr='xg'):
+    finally_data_statsd = {}
+    finally_data_falcon = []
     if data:
         for domain in data:
             domain_name = domain.replace('.', '_')
+            tags = 'idc' + '=' + idc_addr + ',' + \
+                   'hostname' + '=' + HOSTNAME + ',' + \
+                   'vhost' + '=' + domain
             for k, v in data[domain].items():
                 metric = idc_addr + '.' + HOSTNAME + '.' + domain_name + '.' + k
-                finally_data[metric] = v
-        return finally_data
-
-
-# def get_finally_data_falcon(data=None, idc_addr='xg'):
-#     finally_data = {}
+                finally_data_statsd[metric] = v
+                finally_data_falcon.append(falcon_structure(HOSTNAME, 'nginx.' + k, int(time()), v, tags=tags))
+        return finally_data_statsd, finally_data_falcon
 
 
 def send_to_falcon(url=None, data=None):
@@ -159,7 +164,7 @@ def send_to_statsd(statsd_client, data=None):
         for metric, v in data.items():
             statsd_client.gauge(metric, v)
             # log.info(metric + ":" + str(v))
-        log.info('Successfully sent %d metrics !', len(data))
+        log.info('Successfully sent %d metrics to StatsD!', len(data))
 
 
 def main():
@@ -168,36 +173,33 @@ def main():
     statsd_client = statsd.StatsClient(statsd_host, statsd_port, prefix)
     nginx_data = get_nginx_data()
 
-    try:
-        if nginx_data:
-            gauge_data = timer_to_gauge(nginx_data)
-            timer_rate_data = timer_to_timer_rate(gauge_data)
-            finally_data_statsd = fmt_data_statsd(timer_rate_data, idc_addr)
+    if nginx_data:
+        gauge_data = timer_to_gauge(nginx_data)
+        timer_rate_data = timer_to_timer_rate(gauge_data)
 
-            if q.empty():
-                q.put(nginx_data)
-                log.info("Data has been put to the Queue!")
+        if q.empty():
+            q.put(nginx_data)
+            log.info("Data has been put to the Queue!")
 
-            # send metrics to StatsD
-            send_to_statsd(statsd_client, finally_data_statsd)
-            log.info('---\n')
+        if timer_rate_data:
+            finally_data_statsd, finally_data_falcon = fmt_finally_data(timer_rate_data, idc_addr)
 
-    except Exception as e:
-        log.error(e)
-        print_exc()
-    """
-    try:
-        # send metrics to open-falcon
-        url = load_falcon_conf(OPEN_FALCON)
-        res = send_to_falcon(url, finally_data)
-        if res != 'success':
-            raise Exception
-    except Exception as e:
-        log.error(e)
-        print_exc()
+            try:
+                # send metrics to open-falcon
+                url = load_falcon_conf(OPEN_FALCON)
+                res = send_to_falcon(url, finally_data_falcon)
+                if res.text != 'success':
+                    raise Exception(res)
+                log.info('Successfully sent %d metrics to Falcon!', len(finally_data_falcon))
 
-    finally:
-    """
+            except Exception as e:
+                log.error(e)
+                print_exc()
+
+            finally:
+                # send metrics to StatsD
+                send_to_statsd(statsd_client, finally_data_statsd)
+                log.info('---\n')
 
 
 if __name__ == '__main__':
