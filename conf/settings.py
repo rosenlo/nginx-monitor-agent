@@ -102,8 +102,9 @@ METRICS = {
 SEC_METRICS = {
     'rt': 'req_total',
     'ups_rt': 'ups_req',
-    'http_403': 'http_4xx',
-    'http_404': 'http_4xx',
-    'http_500': 'http_5xx',
-    'http_503': 'http_5xx',
+    'http_200': 'req_total',
+    'http_403': 'req_total',
+    'http_404': 'req_total',
+    'http_500': 'req_total',
+    'http_503': 'req_total',
 }

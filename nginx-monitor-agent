@@ -43,7 +43,7 @@ class MyDaemon(Daemon):
                 p = Process(target=main)
                 p.start()
                 p.join()
-                sleep(1)
+            sleep(1)
 
 
 def load_statsd_conf(filename):
